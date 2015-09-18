@@ -40,36 +40,60 @@ def main(args):
 	"""
 	logger = logging.getLogger("CAN-gateway")
 	selector = selectors.DefaultSelector()
+	canToudp_queue = []
+	udpTocan_queue = []
 	while True:
 		try:
 			can_sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
+			can_sock.setblocking(False)
 			can_sock.bind((args.can_interface,))
-			logger.debug("successfully created CAN socket %r",can_sock)
-			def cbCANreadMsg():
-				msgBytes = can_sock.recv(can.CANMessage.size)
-				message = can.unpack(msgBytes)
-				logger.debug("[-->] %r", message)
-			selector.register(can_sock, selectors.EVENT_READ, cbCANreadMsg)
+			logger.debug("successfully created CAN socket %r", can_sock)
+			def cbCAN(mask):
+				try:
+					if mask & selectors.EVENT_READ:
+						msgBytes = can_sock.recv(can.CANMessage.size)
+						message = can.unpack(msgBytes)
+						canToudp_queue.append(message)
+						logger.debug("[CAN --> UDP] %r", message)
+						selector.modify(udp_sock, selectors.EVENT_READ|selectors.EVENT_WRITE, cbUDP)
+					if mask & selectors.EVENT_WRITE:
+						if len(udpTocan_queue) > 0:
+							msgBytes = udpTocan_queue.pop(0)
+							can_sock.send(msgBytes)
+						else:
+							selector.modify(can_sock, selectors.EVENT_READ, cbCAN)
+				except Exception as ex:
+					logger.exception(ex)
+			selector.register(can_sock, selectors.EVENT_READ, cbCAN)
 
-			mcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-			logger.debug("sucessfully created multicast socket %r", mcast_sock)
-
-			recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-			recv_sock.bind(("", args.recv_port))
-			logger.debug("successfully created receiving unicast socket %r", recv_sock)
-			def cbRecvRead():
-				msgBytes = recv_sock.recv(can.CANMessage.size)
-				message = can.unpack(msgBytes)
-				logger.debug("[<--] %r", message)
-				can_sock.send(msgBytes)
-			selector.register(recv_sock, selectors.EVENT_READ, cbRecvRead)
+			udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+			udp_sock.setblocking(False)
+			udp_sock.bind(("", args.recv_port))
+			logger.debug("successfully created UDP socket %r", udp_sock)
+			def cbUDP(mask):
+				try:
+					if mask & selectors.EVENT_READ:
+						msgBytes = udp_sock.recv(can.CANMessage.size)
+						udpTocan_queue.append(msgBytes)
+						message = can.unpack(msgBytes)
+						logger.debug("[CAN <-- UDP] %r", message)
+						selector.modify(can_sock, selectors.EVENT_READ|selectors.EVENT_WRITE, cbCAN)
+					if mask & selectors.EVENT_WRITE:
+						if len(canToudp_queue) > 0:
+							msgBytes = canToudp_queue.pop(0)
+							udp_sock.sendTo(msgBytes, (args.address, args.send_port))
+						else:
+							selector.modify(udp_sock, selectors.EVENT_READ, cbUDP)
+				except Exception as ex:
+					logger.exception(ex)
+			selector.register(udp_sock, selectors.EVENT_READ, cbUDP)
 
 			while True:
 				events = selector.select(SELECT_TIMEOUT)
 				if not events:
 					logger.debug("{}s passed without an event".format(SELECT_TIMEOUT))
 				for key, mask in events:
-					key.data()
+					key.data(mask)
 		except Exception as ex:
 			logger.exception(ex)
 		time.sleep(RECONNECT_TIMEOUT)
