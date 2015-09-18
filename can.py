@@ -28,3 +28,4 @@ class CANMessage():
 def unpack(msg_bytes):
 	canid, dlc, data = struct.unpack(CANMessage.msg_fmt, msg_bytes)
 	msg = CANMessage(canid, data)
+	return msg
