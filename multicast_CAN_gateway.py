@@ -34,6 +34,52 @@ parser.add_argument('--recv-port',\
 
 logging.basicConfig(level=logging.DEBUG)
 
+class MulticastCANGateway():
+	reconnectTimeout = 10
+	selectTimeout = 10
+
+	def __init__(self, canInterface, mcastAddress, recvAddress):
+		self.canInterface = canInterface
+		self.mcastAddress = mcastAddress
+		self.recvAddress = recvAddress
+		self.canQueue = []
+		self.udpQueue = []
+		self.selector = selectors.DefaultSelector()
+		self.sockCAN = None
+		self.sockUDP = None
+
+	def __ensureCANsocket(self):
+		""" Make sure there is a CAN socket. """
+		pass
+
+	def __ensureUDPsocket(self):
+		""" Make sure there is a datagram socket. """
+		pass
+
+	def __do_UDP(self, status):
+		""" Perform UDP send/receive. """
+		pass
+
+	def __do_CAN(self, status):
+		""" Perform CAN send/receive. """
+		pass
+
+	def run(self):
+		""" Run the main loop. """
+		while True:
+			self.__ensureCANsocket()
+			self.__ensureUDPsocket()
+			try:
+				while True:
+					events = self.selector.select(SELECT_TIMEOUT)
+					if not events:
+						self.logger.debug("{}s passed without an event".format(SELECT_TIMEOUT))
+					for key, status in events:
+						key.data(status)
+			except Exception as ex:
+				logger.exception(ex)
+			time.sleep(self.reconnectTimeout)
+
 def main(args):
 	"""
 	Run the main loop of the gateway.
