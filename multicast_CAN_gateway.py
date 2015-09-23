@@ -11,9 +11,6 @@ import selectors
 import logging
 import can
 
-RECONNECT_TIMEOUT = 10
-SELECT_TIMEOUT = 10
-
 parser = argparse.ArgumentParser(description='Translate between UDP and CAN.')
 parser.add_argument('--can-interface',\
 		type=str,\
@@ -32,7 +29,9 @@ parser.add_argument('--recv-port',\
 		required=True,\
 		help='the UDP unicast port to listen on')
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG,\
+		format='[%(asctime)-15s] %(module)-s: [%(levelname)-s] %(message)s')
+logger = logging.getLogger(__name__)
 
 class MulticastCANGateway():
 	reconnectTimeout = 10
@@ -47,7 +46,6 @@ class MulticastCANGateway():
 		self.selector = selectors.DefaultSelector()
 		self.sockCAN = None
 		self.sockUDP = None
-		self.logger = logging.getLogger("CAN-gateway")
 
 	def __ensureCANsocket(self):
 		""" Make sure there is a CAN socket. """
@@ -56,7 +54,7 @@ class MulticastCANGateway():
 			self.sockCAN.setblocking(False)
 			self.sockCAN.bind(self.canInterface)
 			self.selector.register(self.sockCAN, selectors.EVENT_READ, self.__do_CAN)
-			self.logger.debug("successfully created CAN socket %r", self.sockCAN)
+			logger.debug("successfully created CAN socket %r", self.sockCAN)
 
 	def __ensureUDPsocket(self):
 		""" Make sure there is a datagram socket. """
@@ -65,7 +63,7 @@ class MulticastCANGateway():
 			self.sockUDP.setblocking(False)
 			self.sockUDP.bind(self.recvAddress)
 			self.selector.register(self.sockUDP, selectors.EVENT_READ, self.__do_UDP)
-			self.logger.debug("successfully created UDP socket %r", self.sockUDP)
+			logger.debug("successfully created UDP socket %r", self.sockUDP)
 
 	def __do_UDP(self, status):
 		""" Perform UDP send/receive. """
@@ -74,18 +72,18 @@ class MulticastCANGateway():
 				msgBytes = self.sockUDP.recv(can.CANMessage.size)
 				self.canQueue.append(msgBytes)
 				message = can.unpack(msgBytes)
-				self.logger.debug("[UDP --> CAN-queue] %r", message)
+				logger.debug("[UDP --> CAN-queue] %r", message)
 				self.selector.modify(self.sockCAN, selectors.EVENT_READ|selectors.EVENT_WRITE, self.__do_CAN)
 			if status & selectors.EVENT_WRITE:
 				if len(self.udpQueue) > 0:
 					msgBytes = self.udpQueue.pop(0)
 					message = can.unpack(msgBytes)
 					self.sockUDP.sendto(msgBytes, self.mcastAddress)
-					self.logger.debug("[UDP-queue --> UDP] %r", message)
+					logger.debug("[UDP-queue --> UDP] %r", message)
 				else:
 					self.selector.modify(self.sockUDP, selectors.EVENT_READ, self.__do_UDP)
 		except Exception as ex:
-			self.logger.exception(ex)
+			logger.exception(ex)
 
 	def __do_CAN(self, status):
 		""" Perform CAN send/receive. """
@@ -94,18 +92,18 @@ class MulticastCANGateway():
 				msgBytes = self.sockCAN.recv(can.CANMessage.size)
 				self.udpQueue.append(msgBytes)
 				message = can.unpack(msgBytes)
-				self.logger.debug("[CAN --> UDP-queue] %r", message)
+				logger.debug("[CAN --> UDP-queue] %r", message)
 				self.selector.modify(self.sockUDP, selectors.EVENT_READ|selectors.EVENT_WRITE, self.__do_UDP)
 			if status & selectors.EVENT_WRITE:
 				if len(self.canQueue) > 0:
 					msgBytes = self.canQueue.pop(0)
 					message = can.unpack(msgBytes)
 					self.sockCAN.send(msgBytes)
-					self.logger.debug("[CAN-queue --> CAN] %r", message)
+					logger.debug("[CAN-queue --> CAN] %r", message)
 				else:
 					self.selector.modify(self.sockCAN, selectors.EVENT_READ, self.__do_CAN)
 		except Exception as ex:
-			self.logger.exception(ex)
+			logger.exception(ex)
 
 	def run(self):
 		""" Run the main loop. """
@@ -114,9 +112,9 @@ class MulticastCANGateway():
 			self.__ensureUDPsocket()
 			try:
 				while True:
-					events = self.selector.select(SELECT_TIMEOUT)
+					events = self.selector.select(self.selectTimeout)
 					if not events:
-						self.logger.debug("{}s passed without an event".format(SELECT_TIMEOUT))
+						logger.debug("{}s passed without an event".format(self.selectTimeout))
 					for key, status in events:
 						key.data(status)
 			except Exception as ex:
