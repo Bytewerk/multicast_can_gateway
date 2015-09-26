@@ -6,28 +6,9 @@ import sys
 import traceback
 import time
 import socket
-import argparse
 import selectors
 import logging
-import can
-
-parser = argparse.ArgumentParser(description='Translate between UDP and CAN.')
-parser.add_argument('--can-interface',\
-		type=str,\
-		default='can0',\
-		help='the CAN interface to use')
-parser.add_argument('--address',\
-		type=str,\
-		required=True,\
-		help='the multicast address to send to')
-parser.add_argument('--send-port',\
-		type=int,\
-		required=True,\
-		help='the UDP multicast port to send to')
-parser.add_argument('--recv-port',\
-		type=int,\
-		required=True,\
-		help='the UDP unicast port to listen on')
+from . import can
 
 logging.basicConfig(level=logging.DEBUG,\
 		format='[%(asctime)-15s] %(module)-s: [%(levelname)-s] %(message)s')
@@ -129,5 +110,23 @@ def main(args):
 	gateway.run()
 
 if __name__ == '__main__':
+	import argparse
+	parser = argparse.ArgumentParser(description='Translate between UDP and CAN.')
+	parser.add_argument('--can-interface',\
+			type=str,\
+			default='can0',\
+			help='the CAN interface to use')
+	parser.add_argument('--address',\
+			type=str,\
+			required=True,\
+			help='the multicast address to send to')
+	parser.add_argument('--send-port',\
+			type=int,\
+			required=True,\
+			help='the UDP multicast port to send to')
+	parser.add_argument('--recv-port',\
+			type=int,\
+			required=True,\
+			help='the UDP unicast port to listen on')
 	args = parser.parse_args()
 	main(args)

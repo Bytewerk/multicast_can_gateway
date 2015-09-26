@@ -3,18 +3,9 @@
 __author__ = "Peter Brantsch"
 
 import socket
-import argparse
 import logging
 import struct
-import can
-
-parser = argparse.ArgumentParser(description='Receive CAN messages via UDP multicast, send CAN messages to server via UDP unicast')
-parser.add_argument('--mcast-address', type=str, required=True)
-parser.add_argument('--mcast-port', type=int, required=True)
-
-logging.basicConfig(level=logging.DEBUG,\
-		format='[%(asctime)-15s] %(module)-s: [%(levelname)-s] %(message)s')
-logger = logging.getLogger(__name__)
+from . import can
 
 class MulticastCANClient():
 	def __init__(self, mcastAddress, serverAddress):
@@ -35,6 +26,13 @@ class MulticastCANClient():
 		logger.debug("received: %r", msg)
 		return msg
 
+	def sendMsg(self, msg):
+		"""
+		Send CANMessage *msg* to the server.
+		"""
+		self.sockUDP.sendto(bytes(msg), self.serverAddress)
+		logger.debug("sent: %r", msg)
+
 def main(args):
 	"""
 	Demo main function which just prints out received multicast packets.
@@ -44,5 +42,13 @@ def main(args):
 		client.recvMsg()
 
 if __name__ == '__main__':
+	import argparse
+	parser = argparse.ArgumentParser(description='Receive CAN messages via UDP multicast, send CAN messages to server via UDP unicast')
+	parser.add_argument('--mcast-address', type=str, required=True)
+	parser.add_argument('--mcast-port', type=int, required=True)
+
+	logging.basicConfig(level=logging.DEBUG,\
+			format='[%(asctime)-15s] %(module)-s: [%(levelname)-s] %(message)s')
+	logger = logging.getLogger(__name__)
 	args = parser.parse_args()
 	main(args)
