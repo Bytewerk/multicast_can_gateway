@@ -8,7 +8,10 @@ import time
 import socket
 import selectors
 import logging
-from . import can
+try:
+	from . import can
+except: # when running from command line, relative import will not work
+	import can
 
 logging.basicConfig(level=logging.DEBUG,\
 		format='[%(asctime)-15s] %(module)-s: [%(levelname)-s] %(message)s')
@@ -18,15 +21,18 @@ class MulticastCANGateway():
 	reconnectTimeout = 10
 	selectTimeout = 10
 
-	def __init__(self, canInterface, mcastAddress, recvAddress):
+	def __init__(self, canInterface, recvAddress=None, recvAddress6=None, mcastAddress=None, mcastAddress6=None):
 		self.canInterface = canInterface
 		self.mcastAddress = mcastAddress
+		self.mcastAddress6 = mcastAddress6
 		self.recvAddress = recvAddress
+		self.recvAddress6 = recvAddress6
 		self.canQueue = []
 		self.udpQueue = []
 		self.selector = selectors.DefaultSelector()
 		self.sockCAN = None
 		self.sockUDP = None
+		self.sockUDP6 = None
 
 	def __ensureCANsocket(self):
 		""" Make sure there is a CAN socket. """
@@ -43,8 +49,19 @@ class MulticastCANGateway():
 			self.sockUDP = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 			self.sockUDP.setblocking(False)
 			self.sockUDP.bind(self.recvAddress)
+			self.sockUDP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 			self.selector.register(self.sockUDP, selectors.EVENT_READ, self.__do_UDP)
 			logger.debug("successfully created UDP socket %r", self.sockUDP)
+
+	def __ensureUDP6socket(self):
+		""" Make sure there is an IPv6 datagram socket. """
+		if not self.sockUDP6:
+			self.sockUDP6 = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+			self.sockUDP6.setblocking(False)
+			self.sockUDP6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			self.sockUDP6.bind(self.recvAddress6)
+			self.selector.register(self.sockUDP6, selectors.EVENT_READ, self.__do_UDP)
+			logger.debug("successfully created IPv6 UDP socket %r", self.sockUDP)
 
 	def __do_UDP(self, status):
 		""" Perform UDP send/receive. """
@@ -91,6 +108,7 @@ class MulticastCANGateway():
 		while True:
 			self.__ensureCANsocket()
 			self.__ensureUDPsocket()
+			self.__ensureUDP6socket()
 			try:
 				while True:
 					events = self.selector.select(self.selectTimeout)
@@ -106,7 +124,11 @@ def main(args):
 	"""
 	Run the main loop of the gateway.
 	"""
-	gateway = MulticastCANGateway((args.can_interface,), (args.address, args.send_port), ("", args.recv_port))
+	gateway = MulticastCANGateway((args.can_interface,),\
+			mcastAddress = (args.address, args.send_port),\
+			mcastAddress6 = (args.address6, args.send_port),\
+			recvAddress = ("", args.recv_port),\
+			recvAddress6 = ("", args.recv_port))
 	gateway.run()
 
 if __name__ == '__main__':
@@ -115,18 +137,24 @@ if __name__ == '__main__':
 	parser.add_argument('--can-interface',\
 			type=str,\
 			default='can0',\
-			help='the CAN interface to use')
+			help='The CAN interface to use.')
 	parser.add_argument('--address',\
 			type=str,\
-			required=True,\
-			help='the multicast address to send to')
+			#required=True,\
+			help='The IPv4 multicast address to send to. At least one of --address6 or --address must be given.')
+	parser.add_argument('--address6',\
+			type=str,\
+			help='The IPv6 multicast address to send to. At least one of --address6 or --address must be given.')
 	parser.add_argument('--send-port',\
 			type=int,\
 			required=True,\
-			help='the UDP multicast port to send to')
+			help='The UDP multicast port to send to.')
 	parser.add_argument('--recv-port',\
 			type=int,\
 			required=True,\
-			help='the UDP unicast port to listen on')
+			help='The UDP unicast port to listen on.')
 	args = parser.parse_args()
+	if not (args.address or args.address6):
+		parser.print_help()
+		exit(2)
 	main(args)
