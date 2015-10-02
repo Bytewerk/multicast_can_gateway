@@ -1,9 +1,10 @@
-#!/usr/bin/python3
+"""
+This module provides a class which implements a gateway between UDP multicast
+and socket-CAN.
+"""
 
 __author__ = "Peter Brantsch"
 
-import sys
-import traceback
 import time
 import socket
 import selectors
@@ -16,15 +17,28 @@ logging.basicConfig(level=logging.DEBUG,\
 logger = logging.getLogger(__name__)
 
 class MulticastCANGateway():
+    """
+    Translate between UDP multicast and socket-CAN.
+    """
     reconnectTimeout = 10
     selectTimeout = 10
 
-    def __init__(self, canInterface, recvAddress, mcastAddress):
+    def __init__(self, canInterface, recvAddress, recvPort, mcastAddress, mcastPort):
         self.canInterface = canInterface
-        self.mcastAddress = mcastAddress
-        if not (bool(mcastAddress[0]) and mcastAddress[0].is_multicast):
+        self.mcastAddress = mcastAddress if isinstance(mcastAddress, ipaddress.IPv4Address) \
+                or isinstance(mcastAddress, ipaddress.IPv6Address) \
+                else ipaddress.ip_address(mcastAddress)
+        if not self.mcastAddress.is_multicast:
             raise ValueError("mcastAddress must be a multicast address")
-        self.recvAddress = recvAddress
+        self.mcastPort = mcastPort
+        self.recvAddress = recvAddress if isinstance(recvAddress, ipaddress.IPv4Address) \
+                or isinstance(recvAddress, ipaddress.IPv6Address) \
+                else ipaddress.ip_address(recvAddress)
+        self.recvPort = recvPort
+        if not (type(self.mcastAddress) == type(self.recvAddress) \
+                and type(self.mcastAddress) in [ipaddress.IPv4Address, ipaddress.IPv6Address] \
+                and type(self.recvAddress) in [ipaddress.IPv4Address, ipaddress.IPv6Address]):
+            raise TypeError("mcastAddress and recvAddress must have the same address family")
         self.canQueue = []
         self.udpQueue = []
         self.selector = selectors.DefaultSelector()
@@ -36,17 +50,17 @@ class MulticastCANGateway():
         if not self.sockCAN:
             self.sockCAN = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
             self.sockCAN.setblocking(False)
-            self.sockCAN.bind(self.canInterface)
+            self.sockCAN.bind((self.canInterface,))
             self.selector.register(self.sockCAN, selectors.EVENT_READ, self.__do_CAN)
             logger.debug("successfully created CAN socket %r", self.sockCAN)
 
     def __ensureUDPsocket(self):
         """ Make sure there is a datagram socket. """
         if not self.sockUDP:
-            address_family = socket.AF_INET if isinstance(self.mcastAddress[0], ipaddress.IPv4Address) else socket.AF_INET6
+            address_family = socket.AF_INET if isinstance(self.mcastAddress, ipaddress.IPv4Address) else socket.AF_INET6
             self.sockUDP = socket.socket(address_family, socket.SOCK_DGRAM)
             self.sockUDP.setblocking(False)
-            self.sockUDP.bind(self.recvAddress)
+            self.sockUDP.bind((self.recvAddress.compressed, self.recvPort))
             self.sockUDP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.selector.register(self.sockUDP, selectors.EVENT_READ, self.__do_UDP)
             logger.debug("successfully created UDP socket %r", self.sockUDP)
@@ -64,7 +78,7 @@ class MulticastCANGateway():
                 if len(self.udpQueue) > 0:
                     msgBytes = self.udpQueue.pop(0)
                     message = can.unpack(msgBytes)
-                    self.sockUDP.sendto(msgBytes, self.mcastAddress)
+                    self.sockUDP.sendto(msgBytes, (self.mcastAddress.compressed, self.mcastPort))
                     logger.debug("[UDP-queue --> UDP] %r", message)
                 else:
                     self.selector.modify(self.sockUDP, selectors.EVENT_READ, self.__do_UDP)
@@ -111,9 +125,9 @@ def main(args):
     """
     Run the main loop of the gateway.
     """
-    gateway = MulticastCANGateway((args.can_interface,),\
-            ("", args.recv_port),\
-            (args.address, args.send_port))
+    gateway = MulticastCANGateway(args.can_interface,\
+            args.recv_address, args.recv_port,\
+            args.address, args.send_port)
     gateway.run()
 
 if __name__ == '__main__':
@@ -126,7 +140,11 @@ if __name__ == '__main__':
     parser.add_argument('--address',\
             type=ipaddress.ip_address,\
             required=True,\
-            help='The IPv4/IPv6 multicast address to send to. At least one of --address6 or --address must be given.')
+            help='The IPv4/IPv6 multicast address to send to.')
+    parser.add_argument('--recv-address',\
+            type=ipaddress.ip_address,\
+            required=True,\
+            help='The IPv4/IPv6 address to listen on.')
     parser.add_argument('--send-port',\
             type=int,\
             required=True,\

@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """
 Receive CAN messages via UDP multicast, send CAN messages to server via UDP unicast.
 """
